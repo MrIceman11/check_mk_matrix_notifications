@@ -1,6 +1,7 @@
-# Check_mk notifications in Matrix
+# Checkmk Notifications Matrix (Enterprise & Raw Edition)
 
-This scripts gives your Check_mk installation a possibility to send notifications into [Matrix](https://matrix.org) chatroom.
+This script enables your Checkmk installation to send notifications to a Matrix chat room.
+It is now compatible with all Checkmk versions, including Enterprise Edition (JSON-based) and older versions (Environment-based).
 
 ## Installation
 
