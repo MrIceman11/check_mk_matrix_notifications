@@ -1,56 +1,57 @@
 #!/usr/bin/env python3
-
-# Check_mk notifications sender to Matrix.
-#
-# Copyright(c) 2019, Stanislav N. aka pztrn.
-#
-# Permission is hereby granted, free of charge, to any person obtaining
-# a copy of this software and associated documentation files(the
-# "Software"), to deal in the Software without restriction, including
-# without limitation the rights to use, copy, modify, merge, publish,
-# distribute, sublicense, and/or sell copies of the Software, and to
-# permit persons to whom the Software is furnished to do so, subject
-# to the following conditions:
-#
-# The above copyright notice and this permission notice shall be
-# included in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
-# OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# -*- coding: utf-8 -*-
 
 import json
 import os
+import sys
 import random
 import string
-import sys
 import requests
 
-MATRIXHOST = os.environ["NOTIFY_PARAMETER_1"]
-MATRIXTOKEN = os.environ["NOTIFY_PARAMETER_2"]
-MATRIXROOM = os.environ["NOTIFY_PARAMETER_3"]
+# -------------------------
+# Wrapper: Check if STDIN has JSON (Enterprise mode)
+# -------------------------
+if not os.environ.get("NOTIFY_HOSTNAME"):
+    try:
+        input_data = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        sys.exit("ERROR: Keine gültigen JSON-Daten von STDIN erhalten und keine Umgebungsvariablen verfügbar.")
+
+    context = input_data.get("context", {})
+    params = input_data.get("parameters", {})
+
+    # Setze alte Umgebungsvariablen
+    for k, v in context.items():
+        os.environ[k] = v or ""
+    os.environ["NOTIFY_PARAMETER_1"] = params.get("parameter_1", "")
+    os.environ["NOTIFY_PARAMETER_2"] = params.get("parameter_2", "")
+    os.environ["NOTIFY_PARAMETER_3"] = params.get("parameter_3", "")
+
+# -------------------------
+# Dein Originalskript (angepasst für .get())
+# -------------------------
+
+MATRIXHOST = os.environ.get("NOTIFY_PARAMETER_1", "")
+MATRIXTOKEN = os.environ.get("NOTIFY_PARAMETER_2", "")
+MATRIXROOM = os.environ.get("NOTIFY_PARAMETER_3", "")
 
 data = {
-    "TS": os.environ["NOTIFY_SHORTDATETIME"],
+    "TS": os.environ.get("NOTIFY_SHORTDATETIME", ""),
 
     # Host related info.
-    "HOST": os.environ["NOTIFY_HOSTNAME"],
-    "HOSTADDR": os.environ["NOTIFY_HOSTADDRESS"],
-    "HOSTSTATE": os.environ["NOTIFY_HOSTSTATE"],
-    "HOSTSTATEPREVIOUS": os.environ["NOTIFY_LASTHOSTSTATE"],
-    "HOSTSTATECOUNT": os.environ["NOTIFY_HOSTNOTIFICATIONNUMBER"],
-    "HOSTOUTPUT": os.environ["NOTIFY_HOSTOUTPUT"],
+    "HOST": os.environ.get("NOTIFY_HOSTNAME", ""),
+    "HOSTADDR": os.environ.get("NOTIFY_HOSTADDRESS", ""),
+    "HOSTSTATE": os.environ.get("NOTIFY_HOSTSTATE", ""),
+    "HOSTSTATEPREVIOUS": os.environ.get("NOTIFY_LASTHOSTSTATE", ""),
+    "HOSTSTATECOUNT": os.environ.get("NOTIFY_HOSTNOTIFICATIONNUMBER", ""),
+    "HOSTOUTPUT": os.environ.get("NOTIFY_HOSTOUTPUT", ""),
 
     # Service related info.
-    "SERVICE": os.environ["NOTIFY_SERVICEDESC"],
-    "SERVICESTATE": os.environ["NOTIFY_SERVICESTATE"],
-    "SERVICESTATEPREVIOUS": os.environ["NOTIFY_LASTSERVICESTATE"],
-    "SERVICESTATECOUNT": os.environ["NOTIFY_SERVICENOTIFICATIONNUMBER"],
-    "SERVICEOUTPUT": os.environ["NOTIFY_SERVICEOUTPUT"]
+    "SERVICE": os.environ.get("NOTIFY_SERVICEDESC", ""),
+    "SERVICESTATE": os.environ.get("NOTIFY_SERVICESTATE", ""),
+    "SERVICESTATEPREVIOUS": os.environ.get("NOTIFY_LASTSERVICESTATE", ""),
+    "SERVICESTATECOUNT": os.environ.get("NOTIFY_SERVICENOTIFICATIONNUMBER", ""),
+    "SERVICEOUTPUT": os.environ.get("NOTIFY_SERVICEOUTPUT", "")
 }
 
 servicemessage = '''Service <b>{SERVICE}</b> at <b>{HOST}</b> ({HOSTADDR}) | TS: {TS} | STATE: <b>{SERVICESTATE}</b>
@@ -68,9 +69,8 @@ if (data["HOSTSTATE"] != data["HOSTSTATEPREVIOUS"] or data["HOSTSTATECOUNT"] != 
     message = hostmessage.format(**data)
 
 # Check service state.
-# We're replacing it because host state notifications flows in separately
-# from service state notifications and we have no need in host state here.
-if (data["SERVICESTATE"] != data["SERVICESTATEPREVIOUS"] or data["SERVICESTATECOUNT"] != "0") and (data["SERVICE"] != "$SERVICEDESC$"):
+if (data["SERVICE"] and data["SERVICE"] != "$SERVICEDESC$") and \
+   (data["SERVICESTATE"] != data["SERVICESTATEPREVIOUS"] or data["SERVICESTATECOUNT"] != "0"):
     message = servicemessage.format(**data)
 
 # Data we will send to Matrix Homeserver.
@@ -80,15 +80,26 @@ matrixDataDict = {
     "format": "org.matrix.custom.html",
     "formatted_body": message,
 }
-matrixData = json.dumps(matrixDataDict)
-matrixData = matrixData.encode("utf-8")
+matrixData = json.dumps(matrixDataDict).encode("utf-8")
 
 # Random transaction ID for Matrix Homeserver.
 txnId = ''.join(random.SystemRandom().choice(
     string.ascii_uppercase + string.digits) for _ in range(16))
-# Authorization headers and etc.
-matrixHeaders = {"Authorization": "Bearer " + MATRIXTOKEN,
-                 "Content-Type": "application/json", "Content-Length": str(len(matrixData))}
+
+matrixHeaders = {
+    "Authorization": "Bearer " + MATRIXTOKEN,
+    "Content-Type": "application/json",
+    "Content-Length": str(len(matrixData))
+}
+
 # Request.
-req = requests.put(url=MATRIXHOST + "/_matrix/client/r0/rooms/" + MATRIXROOM +
-                             "/send/m.room.message/" + txnId, data=matrixData, headers=matrixHeaders)
+try:
+    req = requests.put(
+        url=MATRIXHOST + "/_matrix/client/r0/rooms/" + MATRIXROOM + "/send/m.room.message/" + txnId,
+        data=matrixData,
+        headers=matrixHeaders
+    )
+    print(f"Matrix API Response: {req.status_code} {req.text}", file=sys.stderr)
+except Exception as e:
+    print(f"ERROR: Matrix-Sendeproblem: {e}", file=sys.stderr)
+    sys.exit(1)
